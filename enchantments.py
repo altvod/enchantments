@@ -14,6 +14,115 @@ class EOLReached(Exception):
         self.buffer = buffer
 
 
+class InvalidPosition(Exception):
+    pass
+
+
+class TextBuffer:
+    def __init__(self, text):
+        self.text = text
+
+    def __getitem__(self, ind):
+        if not isinstance(ind, (int, slice)):
+            raise TypeError('Buffer index must be an integer')
+        if isinstance(ind, int) and ind > len(self.text):
+            raise IndexError('Out of range')
+
+        return self.text[ind]
+
+    def __setitem__(self, ind, text):
+        if isinstance(ind, int):
+            if ind > len(self.text):
+                raise IndexError('Out of range')
+            if len(text) != 1:
+                raise ValueError('Cannot set more that one char')
+            self.text = self.text[:ind] + text + self.text[ind:]
+
+        if isinstance(ind, slice):
+            if slice.step != 1:
+                raise ValueError('Only step = 1 is allowed')
+            self.text = self.text[:ind.start] + text + self.text[ind.stop:]
+
+        else:
+            raise TypeError('Buffer index must be an integer or slice')
+
+    def __contains__(self, item):
+        return item in self.text
+
+    def append(self, text):
+        self.text += text
+
+    def insert(self, ind, text):
+        if isinstance(ind, int):
+            raise TypeError('Buffer index must be an integer')
+        if ind > len(self.text):
+            raise IndexError('Out of range')
+        self.text = self.text[:ind] + text + self.text[ind:]
+
+    def __len__(self):
+        return len(self.text)
+
+
+class RawLine:
+    __slots__ = ('stdscr', 'buffer', 'buffer_pos', 'y', '_minx', '_maxx', '_len')
+
+    def __init__(self, stdscr, buffer, buffer_pos, y, minx=0, maxx=None):
+        self.stdscr = stdscr
+        self.buffer = buffer,
+        self.buffer_pos = buffer_pos
+        self.y = y
+        self._minx = minx
+        self._maxx = maxx
+        self._len = None
+
+    @property
+    def maxx(self):
+        maxx = self._maxx if self._maxx is not None else self.stdscr.getmaxyx()[1]
+        return min(maxx, self.stdscr.getmaxyx()[1])
+
+    @property
+    def minx(self):
+        return min(self._minx, self.stdscr.getmaxyx()[1])
+
+    def __len__(self):
+        self._len = self._len if self._len is not None else self.maxx - self.minx + 1
+        return self._len
+
+    @property
+    def buffer_end_pos(self):
+        return min(len(self.buffer), self.buffer_pos + len(self))
+
+    def move_left(self, size):
+        overflow = self.buffer[self.buffer_pos:self.buffer_pos+size]
+        self.paste(self.minx, self.buffer[self.buffer_pos+size: self.buffer_end_pos])
+        buffer_len = len(self.buffer)
+        if self.buffer_end_pos >= buffer_len:
+            self.buffer[buffer_len-size:buffer_len] = ''
+        return overflow
+
+    def move_right(self, from_x, size):
+        overflow = self.buffer[self.buffer_end_pos-size:self.buffer_end_pos]
+        self.paste(from_x+size, self.buffer[from_x:self.buffer_end_pos-size])
+        return overflow
+
+    def paste(self, from_x, text):
+        """Paste text, overwriting text."""
+        self.stdscr.addstr(self.y, from_x, text)
+        self.buffer[from_x:from_x+len(text)] = text
+
+    def insert(self, from_x, text):
+        """Paste text, moving text to the right; return overflow."""
+        if from_x < self.minx or from_x > self.maxx:
+            raise InvalidPosition
+
+        fitting_len = self.maxx - from_x + 1
+        fitting_text = text[:fitting_len]
+        unfitting_text = text[fitting_len:]
+        overflow = unfitting_text + self.move_right(from_x, fitting_len)
+        self.paste(from_x, fitting_text)
+        return overflow
+
+
 class CursedStream:
     def __init__(self, stdscr):
         self.stdscr = stdscr
@@ -100,7 +209,6 @@ class CursedStream:
     def addstr(self, text):
         """Add char to the buffer. Print it to the screen."""
         text = remove_control_characters(text)
-#        self._expand_height(text.count('\n'))
         if self.pos == len(self.buffer):
             self.buffer += text
             self.stdscr.addstr(text)
@@ -153,11 +261,6 @@ class CursedStream:
 
     def move_cursor_to_end(self):
         self.move_cursor(len(self.buffer) - self.pos)
-
-    def _expand_height(self, inc=1):
-        h, w = self.stdscr.getmaxyx()
-        self.stdscr.resize(h+inc, w)
-        self.stdscr.refresh()
 
     def newline(self):
         self.move_cursor_to_end()
