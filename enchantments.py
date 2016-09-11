@@ -18,6 +18,18 @@ class InvalidPosition(Exception):
     pass
 
 
+class MockScr:
+    def __init__(self, h, w):
+        self.h = h
+        self.w = w
+
+    def addstr(self, y, x, s):
+        pass
+
+    def getmaxyx(self):
+        return self.h-1, self.w-1
+
+
 class TextBuffer:
     def __init__(self, text):
         self.text = text
@@ -36,10 +48,10 @@ class TextBuffer:
                 raise IndexError('Out of range')
             if len(text) != 1:
                 raise ValueError('Cannot set more that one char')
-            self.text = self.text[:ind] + text + self.text[ind:]
+            self.text = self.text[:ind] + text + self.text[ind+1:]
 
-        if isinstance(ind, slice):
-            if slice.step != 1:
+        elif isinstance(ind, slice):
+            if ind.step is not None and ind.step != 1:
                 raise ValueError('Only step = 1 is allowed')
             self.text = self.text[:ind.start] + text + self.text[ind.stop:]
 
@@ -49,18 +61,21 @@ class TextBuffer:
     def __contains__(self, item):
         return item in self.text
 
+    def __len__(self):
+        return len(self.text)
+
     def append(self, text):
         self.text += text
 
     def insert(self, ind, text):
-        if isinstance(ind, int):
+        if not isinstance(ind, int):
             raise TypeError('Buffer index must be an integer')
         if ind > len(self.text):
             raise IndexError('Out of range')
         self.text = self.text[:ind] + text + self.text[ind:]
 
-    def __len__(self):
-        return len(self.text)
+    def clear(self):
+        self.text = ''
 
 
 class RawLine:
@@ -68,7 +83,7 @@ class RawLine:
 
     def __init__(self, stdscr, buffer, buffer_pos, y, minx=0, maxx=None):
         self.stdscr = stdscr
-        self.buffer = buffer,
+        self.buffer = buffer
         self.buffer_pos = buffer_pos
         self.y = y
         self._minx = minx
@@ -117,6 +132,7 @@ class RawLine:
 
         fitting_len = self.maxx - from_x + 1
         fitting_text = text[:fitting_len]
+        fitting_len = len(fitting_text)
         unfitting_text = text[fitting_len:]
         overflow = unfitting_text + self.move_right(from_x, fitting_len)
         self.paste(from_x, fitting_text)
