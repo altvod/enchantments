@@ -161,6 +161,11 @@ class RawLine:
         self.paste(from_x, fitting_text)
         return overflow
 
+    def redraw(self):
+        real_buffer_end_pos = min(self.buffer_end_pos, len(self.buffer))
+        self.stdscr.addstr(self.y, self.minx, self.buffer[self.buffer_pos: real_buffer_end_pos])
+        self.stdscr.addstr(self.y, self.minx, ' '*(self.buffer_end_pos - real_buffer_end_pos))
+
 
 class LineController:
     def __init__(self, stdscr, start_x, start_y, buffer=None):
@@ -169,7 +174,11 @@ class LineController:
         self.start_y = start_y
         self.width = self.stdscr.getmaxyx()[1] + 1
         self.buffer = buffer or TextBuffer()
+        self.lines = []
 
+        self.initialize_lines()
+
+    def initialize_lines(self):
         # Initialize lines
         buffer_pos = 0
         y = self.start_y
@@ -245,6 +254,11 @@ class LineController:
     def delete_xy(self, y, x, size):
         pos = self.yx_to_pos(y, x)
         self.delete_pos(pos, size)
+
+    def redraw(self):
+        self.initialize_lines()
+        for line in self.lines:
+            line.redraw()
 
 
 class CursedStream:
