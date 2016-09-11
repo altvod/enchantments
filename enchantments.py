@@ -31,8 +31,8 @@ class MockScr:
 
 
 class TextBuffer:
-    def __init__(self, text):
-        self.text = text
+    def __init__(self, text=None):
+        self.text = text or ''
 
     def __getitem__(self, ind):
         if not isinstance(ind, (int, slice)):
@@ -107,23 +107,27 @@ class RawLine:
     def buffer_end_pos(self):
         return min(len(self.buffer), self.buffer_pos + len(self))
 
-    def move_left(self, size):
-        overflow = self.buffer[self.buffer_pos:self.buffer_pos+size]
-        self.paste(self.minx, self.buffer[self.buffer_pos+size: self.buffer_end_pos])
+    def move_left(self, from_x, size):
+        buffer_del_pos = self.buffer_pos + (from_x - self.minx)
+        overflow_size = size - (from_x - self.minx)
+        overflow = self.buffer[buffer_del_pos:buffer_del_pos+overflow_size]
+        self.paste(max(self.minx, from_x-size), self.buffer[buffer_del_pos+overflow_size: self.buffer_end_pos])
         buffer_len = len(self.buffer)
         if self.buffer_end_pos >= buffer_len:
             self.buffer[buffer_len-size:buffer_len] = ''
         return overflow
 
     def move_right(self, from_x, size):
+        buffer_ins_pos = self.buffer_pos + (from_x - self.minx)
         overflow = self.buffer[self.buffer_end_pos-size:self.buffer_end_pos]
-        self.paste(from_x+size, self.buffer[from_x:self.buffer_end_pos-size])
+        self.paste(from_x+size, self.buffer[buffer_ins_pos:self.buffer_end_pos-size])
         return overflow
 
     def paste(self, from_x, text):
         """Paste text, overwriting text."""
+        buffer_paste_pos = self.buffer_pos + (from_x - self.minx)
         self.stdscr.addstr(self.y, from_x, text)
-        self.buffer[from_x:from_x+len(text)] = text
+        self.buffer[buffer_paste_pos:buffer_paste_pos+len(text)] = text
 
     def insert(self, from_x, text):
         """Paste text, moving text to the right; return overflow."""
@@ -137,6 +141,90 @@ class RawLine:
         overflow = unfitting_text + self.move_right(from_x, fitting_len)
         self.paste(from_x, fitting_text)
         return overflow
+
+
+class LineController:
+    def __init__(self, stdscr, start_x, start_y, buffer=None):
+        self.stdscr = stdscr
+        self.start_x = start_x
+        self.start_y = start_y
+        self.width = self.stdscr.getmaxyx()[1] + 1
+        self.buffer = buffer or TextBuffer()
+
+        # Initialize lines
+        buffer_pos = 0
+        y = self.start_y
+        self.lines = [
+            RawLine(self.stdscr, self.buffer, buffer_pos, y, self.start_x)
+        ]
+        buffer_pos += len(self.lines[0])
+        while buffer_pos < len(self.buffer):
+            self.lines.append(
+                RawLine(self.stdscr, self.buffer, buffer_pos, y, 0)
+            )
+            buffer_pos += len(self.lines[-1])
+
+    def get_line(self, y):
+        return self.lines[y-self.start_y]
+
+    def pos_to_xy(self, pos):
+        return (self.start_x+pos) % self.width, self.start_y + (self.start_x+pos) // self.width
+
+    def xy_to_pos(self, x, y):
+        return (y - self.start_y) * self.width - self.start_x + x
+
+    def insert_xy(self, x, y, text):
+        line = self.get_line(y)
+        overflow = line.insert(x, text)
+        while overflow:
+            try:
+                line = self.get_line(y)
+            except IndexError:
+                line = RawLine(self.stdscr, self.buffer, len(self.buffer), y, 0)
+                self.lines.append(line)
+
+            overflow = line.insert(0, text)
+            y += 1
+
+    def insert_pos(self, pos, text):
+        x, y = self.pos_to_xy(pos)
+        self.insert_xy(x, y, text)
+
+    def delete_backward_xy(self, x, y, size):
+        while size > self.width:
+            self.delete_backward_xy(x, y, self.width)
+            size -= self.width
+
+        size = max(0, min(size, (y-self.start_y)*self.width - self.start_x + x))
+        max_y = self.start_y + len(self.lines) - 1
+        cur_y = max_y
+        overflow = ''
+        while cur_y >= y:
+            cur_x = 0 if cur_y != y else x
+            previous_overflow = overflow
+            line = self.get_line(cur_y)
+            overflow = line.move_left(cur_x, size)
+            line.paste(len(line)-len(previous_overflow), previous_overflow)
+
+        if overflow:
+            line = self.get_line(y-1)
+            line.move_left(x, size)
+
+        if len(self.lines) > 1:
+            if self.lines[-2].buffer_end_pos - self.lines[-2].buffer_pos < len(self.lines[-2]):
+                del self.lines[-1]
+
+    def delete_backward_pos(self, pos, size):
+        x, y = self.pos_to_xy(pos)
+        self.delete_backward_xy(x, y, size)
+
+    def delete_pos(self, pos, size):
+        for i in range(size):
+            self.delete_backward_pos(pos+1, 1)
+
+    def delete_xy(self, x, y, size):
+        pos = self.xy_to_pos(x, y)
+        self.delete_pos(pos, size)
 
 
 class CursedStream:

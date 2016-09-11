@@ -17,7 +17,7 @@ class RawLineTestCase(TestCase):
         self.assertEqual(self.text[:2]+'QWE'+self.text[5:], self.buffer.text)
 
     def test_move_left(self):
-        overflow =self.line.move_left(3)
+        overflow =self.line.move_left(0, 3)
         #    abcdefghij
         # <--
         #    defghij      (overflow: abc)
