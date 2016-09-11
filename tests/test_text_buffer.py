@@ -37,3 +37,7 @@ class TextBufferTestCase(TestCase):
     def test_clear(self):
         self.buffer.clear()
         self.assertEqual('', self.buffer.text)
+
+    def test_grow(self):
+        self.buffer.grow(5)
+        self.assertEqual(self.text+' '*5, self.buffer.text)
